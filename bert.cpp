@@ -1,5 +1,6 @@
 #include "bert.h"
 #include "ggml.h"
+#include "tokenizers_cpp.h"
 
 #include <cassert>
 #include <cmath>
@@ -13,6 +14,63 @@
 #include <regex>
 #include <thread>
 #include <algorithm>
+
+using tokenizers::Tokenizer;
+
+class BertTokenizer
+{
+    std::unique_ptr<Tokenizer> tok;
+
+public:
+    BertTokenizer(const std::string &path)
+    {
+
+        // Read blob from file.
+        auto blob = LoadBytesFromFile(path);
+        // Note: all the current factory APIs takes in-memory blob as input.
+        // This gives some flexibility on how these blobs can be read.
+        this->tok = Tokenizer::FromBlobJSON(blob);
+    }
+
+    ~BertTokenizer()
+    {
+        this->tok.reset();
+    }
+
+    std::vector<int> Encode(const std::string &text)
+    {
+        return tok.get()->Encode(text);
+    }
+
+    std::string LoadBytesFromFile(const std::string &path)
+    {
+        std::ifstream fs(path, std::ios::in | std::ios::binary);
+        if (fs.fail())
+        {
+            std::cerr << "Cannot open " << path << std::endl;
+            exit(1);
+        }
+        std::string data;
+        fs.seekg(0, std::ios::end);
+        size_t size = static_cast<size_t>(fs.tellg());
+        fs.seekg(0, std::ios::beg);
+        data.resize(size);
+        fs.read(data.data(), size);
+        return data;
+    }
+
+    void PrintEncodeResult(const std::vector<int> &ids)
+    {
+        std::cout << "tokens=[";
+        for (size_t i = 0; i < ids.size(); ++i)
+        {
+            if (i != 0)
+                std::cout << ", ";
+            std::cout << ids[i];
+        }
+        std::cout << "]" << std::endl;
+    }
+};
 
 // default hparams (all-MiniLM-L6-v2)
 struct bert_hparams
@@ -82,26 +140,29 @@ struct bert_model
 };
 
 // Replacement for std::vector<uint8_t> that doesn't require zero-initialization.
-struct bert_buffer {
-    uint8_t * data = NULL;
+struct bert_buffer
+{
+    uint8_t *data = NULL;
     size_t size = 0;
 
-    void resize(size_t size) {
+    void resize(size_t size)
+    {
         delete[] data;
         data = new uint8_t[size];
         this->size = size;
     }
 
-    ~bert_buffer() {
+    ~bert_buffer()
+    {
         delete[] data;
     }
 };
-
 
 struct bert_ctx
 {
     bert_model model;
     bert_vocab vocab;
+    BertTokenizer *tokenizer;
 
     size_t mem_per_token;
     int64_t mem_per_input;
@@ -109,18 +170,19 @@ struct bert_ctx
     bert_buffer buf_compute;
 };
 
-int32_t bert_n_embd(bert_ctx * ctx)
+int32_t bert_n_embd(bert_ctx *ctx)
 {
     return ctx->model.hparams.n_embd;
 }
 
-int32_t bert_n_max_tokens(bert_ctx * ctx)
+int32_t bert_n_max_tokens(bert_ctx *ctx)
 {
     return ctx->model.hparams.n_max_tokens;
 }
 
-const char* bert_vocab_id_to_token(bert_ctx * ctx, bert_vocab_id id) {
-    bert_vocab & vocab = ctx->vocab;
+const char *bert_vocab_id_to_token(bert_ctx *ctx, bert_vocab_id id)
+{
+    bert_vocab &vocab = ctx->vocab;
     auto it = vocab._id_to_token.find(id);
     if (it != vocab._id_to_token.end())
     {
@@ -154,7 +216,6 @@ void bert_print_usage(char **argv, const bert_params &params)
     fprintf(stderr, "\n");
 }
 
-
 bool bert_params_parse(int argc, char **argv, bert_params &params)
 {
     for (int i = 1; i < argc; i++)
@@ -176,6 +237,10 @@ bool bert_params_parse(int argc, char **argv, bert_params &params)
         else if (arg == "-m" || arg == "--model")
         {
             params.model = argv[++i];
+        }
+        else if (arg == "-k" || arg == "--tokenizer")
+        {
+            params.tokenizer = argv[++i];
         }
         else if (arg == "-h" || arg == "--help")
         {
@@ -207,16 +272,59 @@ static size_t utf8_len(char src)
 std::string stripAccents(const std::string &inputString)
 {
     std::string resultString;
-    std::map<std::string, char> accentMap = {{"À", 'A'},{"Á", 'A'},
-        {"Â", 'A'},{"Ã", 'A'},{"Ä", 'A'},{"Å", 'A'},{"à", 'a'},{"á", 'a'},
-        {"â", 'a'},{"ã", 'a'},{"ä", 'a'},{"å", 'a'},{"È", 'E'},{"É", 'E'},
-        {"Ê", 'E'},{"Ë", 'E'},{"è", 'e'},{"é", 'e'},{"ê", 'e'},{"ë", 'e'},
-        {"Ì", 'I'},{"Í", 'I'},{"Î", 'I'},{"Ï", 'I'},{"ì", 'i'},{"í", 'i'},
-        {"î", 'i'},{"ï", 'i'},{"Ò", 'O'},{"Ó", 'O'},{"Ô", 'O'},{"Õ", 'O'},
-        {"Ö", 'O'},{"ò", 'o'},{"ó", 'o'},{"ô", 'o'},{"õ", 'o'},{"ö", 'o'},
-        {"Ù", 'U'},{"Ú", 'U'},{"Û", 'U'},{"Ü", 'U'},{"ù", 'u'},{"ú", 'u'},
-        {"û", 'u'},{"ü", 'u'},{"Ý", 'Y'},{"ý", 'y'},{"Ç", 'C'},{"ç", 'c'},
-        {"Ñ", 'N'},{"ñ", 'n'},
+    std::map<std::string, char> accentMap = {
+        {"À", 'A'},
+        {"Á", 'A'},
+        {"Â", 'A'},
+        {"Ã", 'A'},
+        {"Ä", 'A'},
+        {"Å", 'A'},
+        {"à", 'a'},
+        {"á", 'a'},
+        {"â", 'a'},
+        {"ã", 'a'},
+        {"ä", 'a'},
+        {"å", 'a'},
+        {"È", 'E'},
+        {"É", 'E'},
+        {"Ê", 'E'},
+        {"Ë", 'E'},
+        {"è", 'e'},
+        {"é", 'e'},
+        {"ê", 'e'},
+        {"ë", 'e'},
+        {"Ì", 'I'},
+        {"Í", 'I'},
+        {"Î", 'I'},
+        {"Ï", 'I'},
+        {"ì", 'i'},
+        {"í", 'i'},
+        {"î", 'i'},
+        {"ï", 'i'},
+        {"Ò", 'O'},
+        {"Ó", 'O'},
+        {"Ô", 'O'},
+        {"Õ", 'O'},
+        {"Ö", 'O'},
+        {"ò", 'o'},
+        {"ó", 'o'},
+        {"ô", 'o'},
+        {"õ", 'o'},
+        {"ö", 'o'},
+        {"Ù", 'U'},
+        {"Ú", 'U'},
+        {"Û", 'U'},
+        {"Ü", 'U'},
+        {"ù", 'u'},
+        {"ú", 'u'},
+        {"û", 'u'},
+        {"ü", 'u'},
+        {"Ý", 'Y'},
+        {"ý", 'y'},
+        {"Ç", 'C'},
+        {"ç", 'c'},
+        {"Ñ", 'N'},
+        {"ñ", 'n'},
     };
 
     for (size_t i = 0; i < inputString.length();)
@@ -240,6 +348,7 @@ std::string stripAccents(const std::string &inputString)
 
 std::string bert_normalize_prompt(const std::string &text)
 {
+    // yz: in rust, char is a unicode, https://doc.rust-lang.org/std/char/index.html
     // TODO: handle chinese characters? https://github.com/huggingface/tokenizers/blob/ef5f50605ddf9f8caef1598c0e4853862b9707a7/tokenizers/src/normalizers/bert.rs#L98
     std::string text2 = stripAccents(text);
     for (size_t i = 0; i < text2.size(); i += utf8_len(text2[i]))
@@ -251,75 +360,27 @@ std::string bert_normalize_prompt(const std::string &text)
     return text2;
 }
 void bert_tokenize(
-    struct bert_ctx * ctx,
-    const char * text,
-    bert_vocab_id * tokens,
-    int32_t * n_tokens,
+    struct bert_ctx *ctx,
+    const char *text,
+    bert_vocab_id *tokens,
+    int32_t *n_tokens,
     int32_t n_max_tokens)
 {
+    auto tokenizer = ctx->tokenizer;
+
+    // TODO: add normalization
+
+    // call Encode to turn prompt into token ids
+    std::vector<int> ids = tokenizer->Encode(text);
+
     int cls_tok_id = 101;
     int sep_tok_id = 102;
-    const bert_vocab &vocab = ctx->vocab;
-
-    std::string str = text;
-
-    std::vector<std::string> words;
-    // first split the text into words
-    {
-        str = bert_normalize_prompt(str);
-
-        std::string pat = R"([[:punct:]]|[[:alpha:]]+|[[:digit:]]+)";
-
-        std::regex re(pat);
-        std::smatch m;
-
-        while (std::regex_search(str, m, re))
-        {
-            for (std::string x : m)
-            {
-                words.push_back(x);
-            }
-            str = m.suffix();
-        }
-    }
 
     int32_t t = 0;
     tokens[t++] = cls_tok_id;
-
-    // find the longest tokens that form the words:
-    for (const auto &word : words)
+    for (auto it = ids.begin(); it != ids.end(); it++)
     {
-        if (word.size() == 0)
-            continue;
-
-        int i = 0;
-        int n = word.size();
-        auto *token_map = &vocab.token_to_id;
-    loop:
-        while (i < n)
-        {
-            if (t >= n_max_tokens - 1)
-                break;
-            int j = n;
-            while (j > i)
-            {
-                auto it = token_map->find(word.substr(i, j - i));
-                if (it != token_map->end())
-                {
-                    tokens[t++] = it->second;
-                    i = j;
-                    token_map = &vocab.subword_token_to_id;
-                    goto loop;
-                }
-                --j;
-            }
-            if (j == i)
-            {
-                fprintf(stderr, "%s: unknown token '%s'\n", __func__, word.substr(i, 1).data());
-                token_map = &vocab.subword_token_to_id;
-                ++i;
-            }
-        }
+        tokens[t++] = *it;
     }
     tokens[t++] = sep_tok_id;
     *n_tokens = t;
@@ -329,7 +390,7 @@ void bert_tokenize(
 // Loading and setup
 //
 
-struct bert_ctx * bert_load_from_file(const char *fname)
+struct bert_ctx *bert_load_from_file(const char *fname, const char *tname)
 {
     printf("%s: loading model from '%s' - please wait ...\n", __func__, fname);
 
@@ -351,9 +412,10 @@ struct bert_ctx * bert_load_from_file(const char *fname)
         }
     }
 
-    bert_ctx * new_bert = new bert_ctx;
-    bert_model & model = new_bert->model;
-    bert_vocab & vocab = new_bert->vocab;
+    bert_ctx *new_bert = new bert_ctx;
+    new_bert->tokenizer = new BertTokenizer(tname);
+    bert_model &model = new_bert->model;
+    bert_vocab &vocab = new_bert->vocab;
 
     // load hparams
     {
@@ -446,8 +508,8 @@ struct bert_ctx * bert_load_from_file(const char *fname)
 
         // Calculate size requirements
 
-        model_mem_req += n_embd * n_vocab * ggml_type_sizef(wtype); // word_embeddings
-        model_mem_req += n_embd * 2 * ggml_type_sizef(wtype); // token_type_embeddings
+        model_mem_req += n_embd * n_vocab * ggml_type_sizef(wtype);      // word_embeddings
+        model_mem_req += n_embd * 2 * ggml_type_sizef(wtype);            // token_type_embeddings
         model_mem_req += n_embd * n_max_tokens * ggml_type_sizef(wtype); // position_embeddings
 
         model_mem_req += 2 * n_embd * ggml_type_sizef(GGML_TYPE_F32); // ln_e_*
@@ -455,11 +517,11 @@ struct bert_ctx * bert_load_from_file(const char *fname)
         model_mem_req += 4 * n_layer * (n_embd * ggml_type_sizef(GGML_TYPE_F32)); // ln_*
 
         model_mem_req += 4 * n_layer * (n_embd * n_embd * ggml_type_sizef(wtype)); // kqvo weights
-        model_mem_req += 4 * n_layer * (n_embd * ggml_type_sizef(GGML_TYPE_F32)); // kqvo bias
+        model_mem_req += 4 * n_layer * (n_embd * ggml_type_sizef(GGML_TYPE_F32));  // kqvo bias
 
         model_mem_req += 2 * n_layer * (n_embd * n_intermediate * ggml_type_sizef(wtype)); // ff_*_w
-        model_mem_req += n_layer * (n_intermediate * ggml_type_sizef(GGML_TYPE_F32)); // ff_i_b
-        model_mem_req += n_layer * (n_embd * ggml_type_sizef(GGML_TYPE_F32)); // ff_o_b
+        model_mem_req += n_layer * (n_intermediate * ggml_type_sizef(GGML_TYPE_F32));      // ff_i_b
+        model_mem_req += n_layer * (n_embd * ggml_type_sizef(GGML_TYPE_F32));              // ff_o_b
 
         model_mem_req += (5 + 16 * n_layer) * 512; // object overhead
 
@@ -493,7 +555,6 @@ struct bert_ctx * bert_load_from_file(const char *fname)
         const int n_max_tokens = hparams.n_max_tokens;
         const int n_vocab = hparams.n_vocab;
         const int n_vocab_size = hparams.n_vocab_size;
-        
 
         model.layers.resize(n_layer);
 
@@ -691,34 +752,39 @@ struct bert_ctx * bert_load_from_file(const char *fname)
         // TODO: Max tokens should be a param?
         int32_t N = new_bert->model.hparams.n_max_tokens;
         new_bert->mem_per_input = 1.1 * (new_bert->mem_per_token * N); // add 10% to account for ggml object overhead
-
     }
     printf("%s: mem_per_token %zu KB, mem_per_input %lld MB\n", __func__, new_bert->mem_per_token / (1 << 10), new_bert->mem_per_input / (1 << 20));
 
     return new_bert;
 }
 
-void bert_resize_ctx(bert_ctx * ctx, int32_t new_size) {    
+void bert_resize_ctx(bert_ctx *ctx, int32_t new_size)
+{
     int64_t buf_size_new = ctx->mem_per_input * new_size;
 
     // TODO: Max memory should be a param? Now just 1 GB
     int64_t GB = 1 << 30;
-    //printf("%s: requested_buf_size %lldMB\n", __func__, buf_size_new / (1 << 20));
-    if (buf_size_new > GB) {
+    // printf("%s: requested_buf_size %lldMB\n", __func__, buf_size_new / (1 << 20));
+    if (buf_size_new > GB)
+    {
         int32_t adjusted_new_size = GB / ctx->mem_per_input;
-        if (adjusted_new_size < 1) adjusted_new_size = 1;
-        //printf("%s: requested batch size %d, actual new batch size %d\n", __func__, new_size, adjusted_new_size);
+        if (adjusted_new_size < 1)
+            adjusted_new_size = 1;
+        // printf("%s: requested batch size %d, actual new batch size %d\n", __func__, new_size, adjusted_new_size);
         new_size = adjusted_new_size;
         buf_size_new = ctx->mem_per_input * new_size;
     }
-    if (new_size > ctx->max_batch_n) {
+    if (new_size > ctx->max_batch_n)
+    {
         ctx->buf_compute.resize(buf_size_new);
         ctx->max_batch_n = new_size;
     }
 }
 
-void bert_free(bert_ctx * ctx) {
+void bert_free(bert_ctx *ctx)
+{
     ggml_free(ctx->model.ctx);
+    delete ctx->tokenizer;
     delete ctx;
 }
 
@@ -733,19 +799,21 @@ void bert_eval(
 }
 
 void bert_eval_batch(
-    bert_ctx * ctx,
+    bert_ctx *ctx,
     int32_t n_threads,
     int32_t n_batch_size,
-    bert_vocab_id ** batch_tokens,
-    int32_t * n_tokens,
-    float ** batch_embeddings)
+    bert_vocab_id **batch_tokens,
+    int32_t *n_tokens,
+    float **batch_embeddings)
 {
-    const bert_model& model = ctx->model;
+    const bert_model &model = ctx->model;
     bool mem_req_mode = !batch_embeddings;
     // batch_embeddings is nullptr for the initial memory requirements run
-    if (!mem_req_mode && n_batch_size > ctx->max_batch_n) {
+    if (!mem_req_mode && n_batch_size > ctx->max_batch_n)
+    {
         bert_resize_ctx(ctx, n_batch_size);
-        if (n_batch_size > ctx->max_batch_n) {
+        if (n_batch_size > ctx->max_batch_n)
+        {
             fprintf(stderr, "%s: tried to increase buffers to batch size %d but failed\n", __func__, n_batch_size);
             return;
         }
@@ -773,8 +841,8 @@ void bert_eval_batch(
             return;
         }
 
-        auto & mem_per_token = ctx->mem_per_token;
-        auto & buf_compute   = ctx->buf_compute;
+        auto &mem_per_token = ctx->mem_per_token;
+        auto &buf_compute = ctx->buf_compute;
 
         struct ggml_init_params params = {
             .mem_size = buf_compute.size,
@@ -922,19 +990,21 @@ void bert_eval_batch(
         ggml_build_forward_expand(&gf, output);
         ggml_graph_compute_with_ctx(ctx0, &gf, n_threads);
 
-
         // float *dat = ggml_get_data_f32(output);
         // pretty_print_tensor(dat, output->ne, output->nb, output->n_dims - 1, "");
 
-        #ifdef GGML_PERF
-            // print timing information per ggml operation (for debugging purposes)
-            // requires GGML_PERF to be defined
-            ggml_graph_print(&gf);
-        #endif
+#ifdef GGML_PERF
+        // print timing information per ggml operation (for debugging purposes)
+        // requires GGML_PERF to be defined
+        ggml_graph_print(&gf);
+#endif
 
-        if (!mem_req_mode) {
+        if (!mem_req_mode)
+        {
             memcpy(batch_embeddings[ba], (float *)ggml_get_data(output), sizeof(float) * n_embd);
-        } else {
+        }
+        else
+        {
             mem_per_token = ggml_used_mem(ctx0) / N;
 
             // printf("used_mem = %zu KB \n", ggml_used_mem(ctx0) / 1024);
@@ -959,7 +1029,7 @@ void bert_encode_batch(
     int32_t n_threads,
     int32_t n_batch_size,
     int32_t n_inputs,
-    const char ** texts,
+    const char **texts,
     float **embeddings)
 {
     // TODO: Disable batching for now
@@ -980,17 +1050,22 @@ void bert_encode_batch(
     // Most of this buffer will be unused in typical case where inputs are not that long.
     buf_tokens.resize(N * n_inputs);
     std::vector<int32_t> n_tokens = std::vector<int32_t>(n_inputs);
-    std::vector<bert_vocab_id*> unsorted_tokens(n_inputs);
-    bert_vocab_id* it_tokens = buf_tokens.data();
-    for (int i = 0; i < n_inputs; i++) {
+    std::vector<bert_vocab_id *> unsorted_tokens(n_inputs);
+    bert_vocab_id *it_tokens = buf_tokens.data();
+
+    for (int i = 0; i < n_inputs; i++)
+    {
         unsorted_tokens[i] = it_tokens;
+
         bert_tokenize(ctx, texts[i], it_tokens, &n_tokens[i], N);
-        it_tokens += n_tokens[i];
     }
 
-    if (n_batch_size == n_inputs) {
+    if (n_batch_size == n_inputs)
+    {
         bert_eval_batch(ctx, n_threads, n_batch_size, unsorted_tokens.data(), n_tokens.data(), embeddings);
-    } else {
+    }
+    else
+    {
         // sort the inputs by tokenized length, batch and eval
 
         std::vector<int> indices;
@@ -1010,7 +1085,8 @@ void bert_encode_batch(
         std::vector<float *> sorted_embeddings(n_inputs);
         memcpy(sorted_embeddings.data(), embeddings, n_inputs * sizeof(float *));
 
-        for (int i = 0; i < n_inputs; i++) {
+        for (int i = 0; i < n_inputs; i++)
+        {
             sorted_embeddings[i] = embeddings[indices[i]];
             sorted_tokens[i] = unsorted_tokens[indices[i]];
             sorted_n_tokens[i] = n_tokens[indices[i]];
@@ -1018,7 +1094,8 @@ void bert_encode_batch(
 
         for (int i = 0; i < n_inputs; i += n_batch_size)
         {
-            if (i + n_batch_size > n_inputs) {
+            if (i + n_batch_size > n_inputs)
+            {
                 n_batch_size = n_inputs - i;
             }
             bert_eval_batch(ctx, n_threads, n_batch_size, &sorted_tokens[i], &sorted_n_tokens[i], &sorted_embeddings[i]);
