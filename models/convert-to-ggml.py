@@ -1,4 +1,5 @@
 import json
+import os
 import struct
 import sys
 
@@ -72,13 +73,21 @@ if not isinstance(vocab, dict):
 # id:key
 reversed_vocab = {idx: key for key, idx in vocab.items()}
 
-# use vocab_size to confirm size
-for idx in range(hparams["vocab_size"]):
-    text = reversed_vocab[idx]
-    # print(f"{i}:{text}")
-    data = bytes(text, "utf-8")
-    fout.write(struct.pack("i", len(data)))
-    fout.write(data)
+if not os.path.exists(dir_model + "/vocab.json"):
+    with open(dir_model + "/vocab.json", "w") as f:
+        json.dump(reversed_vocab, f, indent=True, ensure_ascii=False)
+
+# # use vocab_size to confirm size
+# for idx in range(hparams["vocab_size"]):
+#     text = reversed_vocab[idx]
+#     # print(f"{i}:{text}")
+#     data = bytes(text, "utf-8")
+#     fout.write(struct.pack("i", len(data)))
+#     fout.write(data)
+
+tokenizer_json = json.dumps(encoder)
+fout.write(struct.pack("i", len(tokenizer_json)))
+fout.write(tokenizer_json.encode("utf-8"))
 
 for name in list_vars.keys():
     data = list_vars[name].squeeze().numpy()
