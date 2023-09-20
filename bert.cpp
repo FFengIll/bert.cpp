@@ -248,10 +248,6 @@ bool bert_params_parse(int argc, char **argv, bert_params &params)
         {
             params.model = argv[++i];
         }
-        else if (arg == "-k" || arg == "--tokenizer")
-        {
-            params.tokenizer = argv[++i];
-        }
         else if (arg == "-h" || arg == "--help")
         {
             bert_print_usage(argv, params);
