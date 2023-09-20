@@ -22,11 +22,21 @@ class BertTokenizer
     std::unique_ptr<Tokenizer> tok;
 
 public:
-    BertTokenizer(const std::string &path)
+    // BertTokenizer(const std::string &path)
+    // {
+
+    //     // Read blob from file.
+    //     auto blob = LoadBytesFromFile(path);
+    //     // Note: all the current factory APIs takes in-memory blob as input.
+    //     // This gives some flexibility on how these blobs can be read.
+    //     this->tok = Tokenizer::FromBlobJSON(blob);
+    // }
+
+    BertTokenizer(const std::string &blob)
     {
 
         // Read blob from file.
-        auto blob = LoadBytesFromFile(path);
+        // auto blob = LoadBytesFromFile(path);
         // Note: all the current factory APIs takes in-memory blob as input.
         // This gives some flexibility on how these blobs can be read.
         this->tok = Tokenizer::FromBlobJSON(blob);
@@ -390,7 +400,7 @@ void bert_tokenize(
 // Loading and setup
 //
 
-struct bert_ctx *bert_load_from_file(const char *fname, const char *tname)
+struct bert_ctx *bert_load_from_file(const char *fname)
 {
     printf("%s: loading model from '%s' - please wait ...\n", __func__, fname);
 
@@ -413,7 +423,6 @@ struct bert_ctx *bert_load_from_file(const char *fname, const char *tname)
     }
 
     bert_ctx *new_bert = new bert_ctx;
-    new_bert->tokenizer = new BertTokenizer(tname);
     bert_model &model = new_bert->model;
     bert_vocab &vocab = new_bert->vocab;
 
@@ -440,32 +449,44 @@ struct bert_ctx *bert_load_from_file(const char *fname, const char *tname)
         printf("%s: f16     = %d\n", __func__, hparams.f16);
     }
 
-    // load vocab
+    // load tokenizer.json
     {
-        int32_t n_vocab = model.hparams.n_vocab;
+        uint32_t len;
+        fin.read((char *)&len, sizeof(len));
 
         std::string word;
-        for (int i = 0; i < n_vocab; i++)
-        {
-            uint32_t len;
-            fin.read((char *)&len, sizeof(len));
+        word.resize(len);
+        fin.read((char *)word.data(), len);
 
-            word.resize(len);
-            fin.read((char *)word.data(), len);
-
-            if (word[0] == '#' && word[1] == '#')
-            {
-                vocab.subword_token_to_id[word.substr(2)] = i;
-                vocab._id_to_subword_token[i] = word;
-            }
-
-            if (vocab.token_to_id.count(word) == 0)
-            {
-                vocab.token_to_id[word] = i;
-                vocab._id_to_token[i] = word;
-            }
-        }
+        new_bert->tokenizer = new BertTokenizer(word);
     }
+
+    // // load vocab
+    // {
+    //     int32_t n_vocab = model.hparams.n_vocab;
+
+    //     std::string word;
+    //     for (int i = 0; i < n_vocab; i++)
+    //     {
+    //         uint32_t len;
+    //         fin.read((char *)&len, sizeof(len));
+
+    //         word.resize(len);
+    //         fin.read((char *)word.data(), len);
+
+    //         if (word[0] == '#' && word[1] == '#')
+    //         {
+    //             vocab.subword_token_to_id[word.substr(2)] = i;
+    //             vocab._id_to_subword_token[i] = word;
+    //         }
+
+    //         if (vocab.token_to_id.count(word) == 0)
+    //         {
+    //             vocab.token_to_id[word] = i;
+    //             vocab._id_to_token[i] = word;
+    //         }
+    //     }
+    // }
 
     // for the big tensors, we have the option to store the data in 16-bit floats or quantized
     // in order to save memory and also to speed up the computation
