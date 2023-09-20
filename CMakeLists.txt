@@ -188,15 +188,34 @@ if (MSVC)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 endif()
 
+set(TOKENZIER_CPP_PATH tokenizers-cpp)
+add_subdirectory(${TOKENZIER_CPP_PATH} tokenizers)
+
+include(CheckCXXCompilerFlag)
+if(NOT MSVC)
+  check_cxx_compiler_flag("-std=c++17" SUPPORT_CXX17)
+  set(CMAKE_CXX_FLAGS "-std=c++17 ${CMAKE_CXX_FLAGS}")
+  set(CMAKE_CUDA_STANDARD 17)
+else()
+  check_cxx_compiler_flag("/std:c++17" SUPPORT_CXX17)
+  set(CMAKE_CXX_FLAGS "/std:c++17 ${CMAKE_CXX_FLAGS}")
+  set(CMAKE_CUDA_STANDARD 17)
+endif()
+
+
 add_subdirectory(ggml)
 
 add_library(bert
             bert.cpp
             bert.h)
 
+target_include_directories(bert PRIVATE ${TOKENZIER_CPP_PATH}/include)
+
 target_include_directories(bert PUBLIC .)
 target_compile_features(bert PUBLIC cxx_std_20)
 target_link_libraries(bert PRIVATE ggml ${BERT_EXTRA_LIBS})
+
+target_link_libraries(bert PRIVATE tokenizers_cpp)
 
 if(WIN32)
 include_directories(${CMAKE_SOURCE_DIR}/include_win)

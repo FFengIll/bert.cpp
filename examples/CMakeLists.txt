@@ -15,12 +15,13 @@ endif()
 
 add_executable(server server.cpp)
 if(NOT WIN32)
-	target_link_libraries(server PRIVATE bert ggml)
+	target_link_libraries(server PRIVATE bert ggml tokenizers_cpp)
 else()
-	target_link_libraries(server PRIVATE bert ggml ws2_32)
+	target_link_libraries(server PRIVATE bert ggml ws2_32 tokenizers_cpp)
 endif()
 add_executable(main main.cpp)
-target_link_libraries(main PRIVATE bert ggml)
+target_link_libraries(main PRIVATE bert ggml tokenizers_cpp)
+
 
 add_executable(test_tokenizer test_tokenizer.cpp)
-target_link_libraries(test_tokenizer PRIVATE bert ggml)
+target_link_libraries(test_tokenizer PRIVATE bert ggml tokenizers_cpp)
