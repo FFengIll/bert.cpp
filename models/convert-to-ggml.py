@@ -63,6 +63,16 @@ fout.write(struct.pack("i", hparams["num_hidden_layers"]))
 fout.write(struct.pack("i", hparams["type_vocab_size"]))
 fout.write(struct.pack("i", ftype))
 
+print("written hparams")
+
+# write tokenizer.json
+print("written tokenizer")
+with open(dir_model + "/tokenizer.json", "rb") as f:
+    data = f.read()
+    fout.write(struct.pack("i", len(data)))
+    fout.write(data)
+
+# write vocab
 vocab_list = []
 
 # print(tokenizer.get_vocab())
@@ -77,17 +87,13 @@ if not os.path.exists(dir_model + "/vocab.json"):
     with open(dir_model + "/vocab.json", "w") as f:
         json.dump(reversed_vocab, f, indent=True, ensure_ascii=False)
 
-# # use vocab_size to confirm size
-# for idx in range(hparams["vocab_size"]):
-#     text = reversed_vocab[idx]
-#     # print(f"{i}:{text}")
-#     data = bytes(text, "utf-8")
-#     fout.write(struct.pack("i", len(data)))
-#     fout.write(data)
-
-tokenizer_json = json.dumps(encoder)
-fout.write(struct.pack("i", len(tokenizer_json)))
-fout.write(tokenizer_json.encode("utf-8"))
+# use vocab_size to confirm size
+for idx in range(hparams["vocab_size"]):
+    text = reversed_vocab[idx]
+    # print(f"{i}:{text}")
+    data = bytes(text, "utf-8")
+    fout.write(struct.pack("i", len(data)))
+    fout.write(data)
 
 for name in list_vars.keys():
     data = list_vars[name].squeeze().numpy()

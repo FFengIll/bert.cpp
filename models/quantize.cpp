@@ -109,21 +109,21 @@ bool bert_model_quantize(const std::string & fname_inp, const std::string & fnam
         fout.write((char *) word.data(), len);
     }
 
-    // // load vocab
-    // {
-    //     int32_t n_vocab = hparams.n_vocab;
+    // load vocab
+    {
+        int32_t n_vocab = hparams.n_vocab;
 
-    //     std::string word;
-    //     for (int i = 0; i < n_vocab; i++) {
-    //         uint32_t len;
-    //         finp.read ((char *) &len, sizeof(len));
-    //         fout.write((char *) &len, sizeof(len));
+        std::string word;
+        for (int i = 0; i < n_vocab; i++) {
+            uint32_t len;
+            finp.read ((char *) &len, sizeof(len));
+            fout.write((char *) &len, sizeof(len));
 
-    //         word.resize(len);
-    //         finp.read ((char *) word.data(), len);
-    //         fout.write((char *) word.data(), len);
-    //     }
-    // }
+            word.resize(len);
+            finp.read ((char *) word.data(), len);
+            fout.write((char *) word.data(), len);
+        }
+    }
 
     // load weights
     {

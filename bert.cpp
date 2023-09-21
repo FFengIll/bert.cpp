@@ -1,6 +1,6 @@
 #include "bert.h"
 #include "ggml.h"
-#include "tokenizers_cpp.h"
+#include "tokenizer.h"
 
 #include <cassert>
 #include <cmath>
@@ -14,73 +14,6 @@
 #include <regex>
 #include <thread>
 #include <algorithm>
-
-using tokenizers::Tokenizer;
-
-class BertTokenizer
-{
-    std::unique_ptr<Tokenizer> tok;
-
-public:
-    // BertTokenizer(const std::string &path)
-    // {
-
-    //     // Read blob from file.
-    //     auto blob = LoadBytesFromFile(path);
-    //     // Note: all the current factory APIs takes in-memory blob as input.
-    //     // This gives some flexibility on how these blobs can be read.
-    //     this->tok = Tokenizer::FromBlobJSON(blob);
-    // }
-
-    BertTokenizer(const std::string &blob)
-    {
-
-        // Read blob from file.
-        // auto blob = LoadBytesFromFile(path);
-        // Note: all the current factory APIs takes in-memory blob as input.
-        // This gives some flexibility on how these blobs can be read.
-        this->tok = Tokenizer::FromBlobJSON(blob);
-    }
-
-    ~BertTokenizer()
-    {
-        this->tok.reset();
-    }
-
-    std::vector<int> Encode(const std::string &text)
-    {
-        return tok.get()->Encode(text);
-    }
-
-    std::string LoadBytesFromFile(const std::string &path)
-    {
-        std::ifstream fs(path, std::ios::in | std::ios::binary);
-        if (fs.fail())
-        {
-            std::cerr << "Cannot open " << path << std::endl;
-            exit(1);
-        }
-        std::string data;
-        fs.seekg(0, std::ios::end);
-        size_t size = static_cast<size_t>(fs.tellg());
-        fs.seekg(0, std::ios::beg);
-        data.resize(size);
-        fs.read(data.data(), size);
-        return data;
-    }
-
-    void PrintEncodeResult(const std::vector<int> &ids)
-    {
-        std::cout << "tokens=[";
-        for (size_t i = 0; i < ids.size(); ++i)
-        {
-            if (i != 0)
-                std::cout << ", ";
-            std::cout << ids[i];
-        }
-        std::cout << "]" << std::endl;
-    }
-};
 
 // default hparams (all-MiniLM-L6-v2)
 struct bert_hparams
@@ -386,9 +319,26 @@ void bert_tokenize(
     tokens[t++] = cls_tok_id;
     for (auto it = ids.begin(); it != ids.end(); it++)
     {
+        // is [PAD]
+        if (*it == 0)
+        {
+            break;
+        }
         tokens[t++] = *it;
+        if (t >= n_max_tokens)
+        {
+            break;
+        }
     }
-    tokens[t++] = sep_tok_id;
+
+    if (t >= n_max_tokens)
+    {
+        tokens[n_max_tokens - 1] = sep_tok_id;
+    }
+    else
+    {
+        tokens[t++] = sep_tok_id;
+    }
     *n_tokens = t;
 }
 
@@ -457,32 +407,23 @@ struct bert_ctx *bert_load_from_file(const char *fname)
         new_bert->tokenizer = new BertTokenizer(word);
     }
 
-    // // load vocab
-    // {
-    //     int32_t n_vocab = model.hparams.n_vocab;
+    // load vocab
+    {
+        int32_t n_vocab = model.hparams.n_vocab;
 
-    //     std::string word;
-    //     for (int i = 0; i < n_vocab; i++)
-    //     {
-    //         uint32_t len;
-    //         fin.read((char *)&len, sizeof(len));
+        std::string word;
+        for (int i = 0; i < n_vocab; i++)
+        {
+            uint32_t len;
+            fin.read((char *)&len, sizeof(len));
 
-    //         word.resize(len);
-    //         fin.read((char *)word.data(), len);
+            word.resize(len);
+            fin.read((char *)word.data(), len);
 
-    //         if (word[0] == '#' && word[1] == '#')
-    //         {
-    //             vocab.subword_token_to_id[word.substr(2)] = i;
-    //             vocab._id_to_subword_token[i] = word;
-    //         }
-
-    //         if (vocab.token_to_id.count(word) == 0)
-    //         {
-    //             vocab.token_to_id[word] = i;
-    //             vocab._id_to_token[i] = word;
-    //         }
-    //     }
-    // }
+            vocab.token_to_id[word] = i;
+            vocab._id_to_token[i] = word;
+        }
+    }
 
     // for the big tensors, we have the option to store the data in 16-bit floats or quantized
     // in order to save memory and also to speed up the computation
