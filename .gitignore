@@ -1,16 +1,39 @@
-.vscode
+# Created by https://www.toptal.com/developers/gitignore/api/c++
+# Edit at https://www.toptal.com/developers/gitignore?templates=c++
 
-build
-models/*/*
+### C++ ###
+# Prerequisites
+*.d
 
-compile_commands.json
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
 
-.exrc
-.cache
-.DS_Store
+# Precompiled Headers
+*.gch
+*.pch
 
-__pycache__
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
 
-models/*/
+# Fortran module files
+*.mod
+*.smod
 
-error_logs.txt
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# End of https://www.toptal.com/developers/gitignore/api/c++
+n
