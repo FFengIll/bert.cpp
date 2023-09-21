@@ -1009,13 +1009,15 @@ void bert_encode_batch(
     buf_tokens.resize(N * n_inputs);
     std::vector<int32_t> n_tokens = std::vector<int32_t>(n_inputs);
     std::vector<bert_vocab_id *> unsorted_tokens(n_inputs);
-    bert_vocab_id *it_tokens = buf_tokens.data();
+    bert_vocab_id *ids = buf_tokens.data();
 
     for (int i = 0; i < n_inputs; i++)
     {
-        unsorted_tokens[i] = it_tokens;
+        unsorted_tokens[i] = ids;
 
-        bert_tokenize(ctx, texts[i], it_tokens, &n_tokens[i], N);
+        bert_tokenize(ctx, texts[i], ids, &n_tokens[i], N);
+
+        ids += n_tokens[i];
     }
 
     if (n_batch_size == n_inputs)
