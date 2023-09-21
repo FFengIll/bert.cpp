@@ -207,7 +207,10 @@ add_subdirectory(ggml)
 
 add_library(bert
             bert.cpp
-            bert.h)
+            bert.h
+            tokenizer.cpp
+            tokenizer.h
+            )
 
 target_include_directories(bert PRIVATE ${TOKENZIER_CPP_PATH}/include)
 
